@@ -1,367 +1,191 @@
+#include "commitNodeList.h"
 #include <iostream>
 #include <fstream>
 #include <filesystem>
-#include <unistd.h>
 #include <ctime>
+#include <unistd.h>
 #include <vector>
 using namespace std;
+namespace fs = filesystem;
 
-// ================  Global Functions  ==================
-string gen_random(const int len)
-{
-    srand((unsigned)time(NULL) * getpid());
+// Utility Functions
+string gen_random(const int len) {
+    srand(time(NULL) * getpid());
     static const char alphanum[] =
-        "0123456789"
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        "abcdefghijklmnopqrstuvwxyz";
+        "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
     string tmp_s;
     tmp_s.reserve(len);
-
     for (int i = 0; i < len; ++i)
-    {
         tmp_s += alphanum[rand() % (sizeof(alphanum) - 1)];
-    }
-
     return tmp_s;
 }
 
-string get_time()
-{
-    time_t t = std::time(0); // get time now
-    tm *now = std::localtime(&t);
-    string dateTime = to_string(now->tm_year + 1900) + "/" +
-                      to_string(now->tm_mon + 1) + "/" +
-                      to_string(now->tm_mday) + " " +
-                      to_string(now->tm_hour) + ":" +
-                      to_string(now->tm_min) + "\n";
-
-    return dateTime;
+string get_time() {
+    time_t t = time(0);
+    tm* now = localtime(&t);
+    return to_string(now->tm_year + 1900) + "/" +
+           to_string(now->tm_mon + 1) + "/" +
+           to_string(now->tm_mday) + " " +
+           to_string(now->tm_hour) + ":" +
+           to_string(now->tm_min);
 }
-// =========================================================
 
-class commitNode
-{
-private:
-    string commitID;
-    string commitMsg;
-    string nextCommitID;
-    commitNode *next;
+// commitNode implementation
+commitNode::commitNode() { next = NULL; }
 
-    void createCommitNode()
-    {
-        // create commit dir, create commitInfo.txt, copy files
-        filesystem::create_directory(filesystem::current_path() / ".git" / "commits" / commitID);
-        auto path = filesystem::current_path() / ".git" / "commits" / commitID / "commitInfo.txt";
-        ofstream write(path.string());
-        write << "1." + commitID + "\n" +
-                     "2." + commitMsg + "\n" +
-                     "3." + get_time() + "\n";
+commitNode::commitNode(string id, string msg) {
+    commitID = id;
+    commitMsg = msg;
+    next = NULL;
+    createCommitNode();
+}
 
-        auto STAGING_AREA_PATH = filesystem::path(filesystem::current_path() / ".git" / "staging_area");
-        const auto copyOptions = filesystem::copy_options::update_existing | filesystem::copy_options::recursive;
-        filesystem::copy(STAGING_AREA_PATH, filesystem::current_path() / ".git" / "commits" / commitID / "Data", copyOptions);
-    }
+commitNode::commitNode(string id) {
+    commitID = id;
+    next = NULL;
+    checkNextCommitId();
+}
 
-public:
-    commitNode()
-    {
-        this->next = NULL;
-    }
-    commitNode(string commitID, string commitMsg)
-    {
-        this->commitID = commitID;
-        this->commitMsg = commitMsg;
-        this->next = NULL;
-        createCommitNode();
-    }
-    commitNode(string commitId)
-    {
-        // msg in not populated.
-        checkNextCommitId();
-        this->commitID = commitId;
-        next = NULL;
-    }
+void commitNode::createCommitNode() {
+    fs::create_directories(".git/commits/" + commitID);
+    ofstream write(".git/commits/" + commitID + "/commitInfo.txt");
+    write << "1." << commitID << "\n"
+          << "2." << commitMsg << "\n"
+          << "3." << get_time() << "\n";
 
-    void revertCommitNode(string fromHash)
-    {
-        filesystem::create_directories(filesystem::current_path() / ".git" / "commits" / getCommitID() / "Data");
-        auto nextCommitPath = filesystem::current_path() / ".git" / "commits" / getCommitID() / "commitInfo.txt";
-        auto copyFrom = filesystem::current_path() / ".git" / "commits" / fromHash / "Data";
-        ofstream write(nextCommitPath.string());
-        write << "1." + commitID + "\n" +
-                     "2." + commitMsg + "\n" +
-                     "3." + get_time() + "\n";
-        const auto copyOptions = filesystem::copy_options::recursive;
-        // cout << "from: "  << copyFrom << " ---- " << "copy to: " << filesystem::current_path() / ".git" / "commits" / getCommitID() / "Data" << endl;
-        filesystem::copy(copyFrom, filesystem::current_path() / ".git" / "commits" / getCommitID() / "Data", copyOptions);
-    }
+    fs::copy(".git/staging_area", ".git/commits/" + commitID + "/Data",
+             fs::copy_options::recursive | fs::copy_options::update_existing);
+}
 
-    void readNodeInfo()
-    {
-        string info;
-        auto path = filesystem::current_path() / ".git" / "commits" / getCommitID() / "commitInfo.txt";
-        ifstream file(path.string());
-        while (getline(file, info))
-        {
-            if (info[0] == '1')
-            {
-                this->setCommitID(info.substr(2));
-            }
-            if (info[0] == '2')
-            {
-                this->setCommitMsg(info.substr(2));
-            }
-        }
-    }
+void commitNode::revertCommitNode(string fromHash) {
+    fs::create_directories(".git/commits/" + commitID + "/Data");
+    fs::copy(".git/commits/" + fromHash + "/Data",
+             ".git/commits/" + commitID + "/Data",
+             fs::copy_options::recursive);
+    ofstream write(".git/commits/" + commitID + "/commitInfo.txt");
+    write << "1." << commitID << "\n"
+          << "2." << commitMsg << "\n"
+          << "3." << get_time() << "\n";
+}
 
-    string getCommitMsg()
-    {
-        return this->commitMsg;
+void commitNode::readNodeInfo() {
+    ifstream file(".git/commits/" + commitID + "/commitInfo.txt");
+    string line;
+    while (getline(file, line)) {
+        if (line[0] == '1') setCommitID(line.substr(2));
+        if (line[0] == '2') setCommitMsg(line.substr(2));
     }
-    void setCommitMsg(string commitMsg)
-    {
-        this->commitMsg = commitMsg;
-    }
+}
 
-    void setCommitID(string commitID)
-    {
-        this->commitID = commitID;
-    }
-    string getCommitID()
-    {
-        return this->commitID;
-    }
+void commitNode::writeNextCommitID(string id) {
+    nextCommitID = id;
+    ofstream out(".git/commits/" + commitID + "/nextCommitInfo.txt");
+    out << id;
+}
 
-    void setNext(commitNode *node)
-    {
-        this->next = node;
-    }
-    commitNode *getNext()
-    {
-        return next;
-    }
+string commitNode::checkNextCommitId() {
+    ifstream in(".git/commits/" + commitID + "/nextCommitInfo.txt");
+    if (in) getline(in, nextCommitID);
+    return nextCommitID;
+}
 
-    void setNextCommitID(string nextCommitId)
-    {
-        this->nextCommitID = nextCommitId;
-    }
-    void writeNextCommitID(string nextCommitID)
-    {
-        setNextCommitID(nextCommitID);
-        auto path = filesystem::current_path() / ".git" / "commits" / getCommitID() / "nextCommitInfo.txt";
-        ofstream write(path.string());
-        write << nextCommitID;
-    }
-    string checkNextCommitId()
-    {
-        filesystem::path tempPath(filesystem::current_path() / ".git" / "commits" / getCommitID() / "nextCommitInfo.txt");
-        bool exists = filesystem::exists(tempPath);
-        if (exists)
-        {
-            string info;
-            ifstream file(tempPath);
-            while (getline(file, info))
-            {
-                this->nextCommitID = info;
+string commitNode::getNextCommitId() { return nextCommitID; }
+string commitNode::getCommitID() { return commitID; }
+string commitNode::getCommitMsg() { return commitMsg; }
+void commitNode::setCommitID(string id) { commitID = id; }
+void commitNode::setCommitMsg(string msg) { commitMsg = msg; }
+void commitNode::setNext(commitNode* n) { next = n; }
+commitNode* commitNode::getNext() { return next; }
+void commitNode::setNextCommitID(string id) { nextCommitID = id; }
+
+// commitNodeList implementation
+bool commitNodeList::checkHead() {
+    return fs::exists(".git/commits/0x1111");
+}
+
+commitNodeList::commitNodeList() {
+    HEAD = NULL;
+    TAIL = NULL;
+    if (checkHead()) HEAD = new commitNode("0x1111");
+}
+
+void commitNodeList::addOnTail(string msg) {
+    if (!checkHead()) {
+        HEAD = new commitNode("0x1111", msg);
+    } else {
+        string newID = gen_random(8);
+        commitNode* curr = HEAD;
+        while (curr) {
+            string nextID = curr->checkNextCommitId();
+            if (nextID.empty()) {
+                commitNode* newNode = new commitNode(newID, msg);
+                curr->writeNextCommitID(newID);
                 break;
-            }
-            file.close();
-            return nextCommitID;
-        }
-        return "";
-    }
-    string getNextCommitId()
-    {
-        return this->nextCommitID;
-    }
-};
-
-class commitNodeList
-{
-private:
-    commitNode *HEAD;
-    commitNode *TAIL;
-
-    bool checkHead()
-    {
-        // check if HEAD commit exists
-        auto tempDir = filesystem::current_path() / ".git" / "commits" / "0x1111";
-        return filesystem::exists(tempDir);
-    }
-
-public:
-    commitNodeList()
-    {
-        setHead(NULL);
-        setTail(NULL);
-        if (checkHead())
-        {
-            setHead(new commitNode("0x1111"));
-        }
-    }
-
-    commitNode *getHead()
-    {
-        return this->HEAD;
-    }
-    void setHead(commitNode *HEAD)
-    {
-        this->HEAD = HEAD;
-    }
-
-    commitNode *getTail()
-    {
-        return this->TAIL;
-    }
-    void setTail(commitNode *TAIL)
-    {
-        this->TAIL = TAIL;
-    }
-
-    void addOnTail(string msg)
-    {
-        if (!checkHead())
-        {
-            commitNode *newNode = new commitNode("0x1111", msg);
-            setHead(newNode);
-        }
-        else
-        {
-            string commitID = gen_random(8);
-            commitNode *currNode = getHead();
-            while (currNode != NULL)
-            {
-                string nextCommitId = currNode->checkNextCommitId();
-
-                if (nextCommitId.length() < 8)
-                {
-                    commitNode *newNode = new commitNode(commitID, msg);
-                    currNode->writeNextCommitID(commitID);
-                    currNode = NULL;
-                }
-                else
-                {
-                    commitNode *newNode = new commitNode();
-                    newNode->setCommitID(nextCommitId);
-                    currNode = newNode;
-                }
+            } else {
+                curr = new commitNode(nextID);
             }
         }
     }
+}
 
-    void revertCommit(string commitHash)
-    {
-        commitNode *commitNodeToRevert;
-        if (!checkHead())
-        {
-            cout << "Nothing to Revert to " << endl;
+void commitNodeList::revertCommit(string hash) {
+    if (!checkHead()) {
+        cout << "Nothing to revert.\n";
+        return;
+    }
+
+    bool found = false;
+    string newID = gen_random(8);
+    commitNode* curr = HEAD;
+    commitNode* target = nullptr;
+
+    while (curr) {
+        if (curr->getCommitID() == hash) {
+            target = curr;
+            found = true;
         }
-        else
-        {
-            bool error = true;
-            string commitID = gen_random(8);
-            commitNode *currNode = getHead();
-            while (currNode != NULL)
-            {
-                string nextCommitId = currNode->checkNextCommitId();
-                if (commitHash == currNode->getCommitID())
-                {
-                    commitNodeToRevert = currNode;
-                    error = false;
-                }
 
-                if (nextCommitId.length() < 8)
-                {
-                    if (!error)
-                    {
-                        commitNodeToRevert->readNodeInfo();
-                        commitNode *newNode = new commitNode();
-                        newNode->setCommitID(commitID);
-                        newNode->setCommitMsg(commitNodeToRevert->getCommitMsg());
-                        newNode->revertCommitNode(commitNodeToRevert->getCommitID());
-
-                        currNode->writeNextCommitID(commitID);
-                    }
-                    currNode = NULL;
-                }
-                else
-                {
-                    commitNode *newNode = new commitNode();
-                    newNode->setCommitID(nextCommitId);
-                    currNode = newNode;
-                }
+        string nextID = curr->checkNextCommitId();
+        if (nextID.empty()) {
+            if (found) {
+                target->readNodeInfo();
+                commitNode* newNode = new commitNode();
+                newNode->setCommitID(newID);
+                newNode->setCommitMsg(target->getCommitMsg());
+                newNode->revertCommitNode(target->getCommitID());
+                curr->writeNextCommitID(newID);
+                cout << "Reverted to commit " << hash << endl;
             }
-
-            if (error == true)
-            {
-                cout << "does not match any Commit Hash" << endl;
-            }
+            break;
+        } else {
+            curr = new commitNode(nextID);
         }
     }
 
-    void printCommitList()
-    {
-        commitNode *currNode = getHead();
-        while (currNode != NULL)
-        {
-            string nextCommitId = currNode->checkNextCommitId();
-            filesystem::path commitPath(filesystem::current_path() / ".git" / "commits" / currNode->getCommitID() / "commitInfo.txt");
-            string info;
-            ifstream file(commitPath.string());
-            while (getline(file, info))
-            {
-                if (info[0] == '1')
-                {
-                    cout << "Commit ID:    " << info.substr(2) << endl;
-                }
-                if (info[0] == '2')
-                {
-                    cout << "Commit Msg:   " << info.substr(2) << endl;
-                }
-                if (info[0] == '3')
-                {
-                    cout << "Date & Time:  " << info.substr(2) << endl;
-                }
-            }
-            file.close();
-            cout << "============================\n\n";
-
-            if (nextCommitId.length() < 8)
-            {
-                currNode = NULL;
-            }
-            else
-            {
-                commitNode *newNode = new commitNode();
-                newNode->setCommitID(nextCommitId);
-                currNode = newNode;
-            }
-        }
+    if (!found) {
+        cout << "No such commit found.\n";
     }
+}
 
-    // void printCommitStatus()
-    // {
-    //     // vector<string> staging_area_files;
-    //     // for (const filesystem::path &file : filesystem::recursive_directory_iterator(filesystem::current_path() / ".git" / "staging_area"))
-    //     // {
-    //     //     staging_area_files.push_back(file.string().substr( file.string().find_last_of('/') + 1 ));
-    //     // }
-    //     // vector<string> latest_commit_files;
-    //     // for (const filesystem::path &file : filesystem::recursive_directory_iterator(filesystem::current_path() / ".git" / getTail()))
-    //     // {
-    //     //     latest_commit_files.push_back(file.string().substr( file.string().find_last_of('/') + 1 ));
-    //     // }
+void commitNodeList::printCommitList() {
+    commitNode* curr = HEAD;
+    while (curr) {
+        string path = ".git/commits/" + curr->getCommitID() + "/commitInfo.txt";
+        ifstream file(path);
+        string line;
+        while (getline(file, line)) {
+            if (line[0] == '1') cout << "Commit ID:   " << line.substr(2) << endl;
+            if (line[0] == '2') cout << "Message:     " << line.substr(2) << endl;
+            if (line[0] == '3') cout << "Timestamp:   " << line.substr(2) << endl;
+        }
+        cout << "===========================\n";
+        string nextID = curr->checkNextCommitId();
+        if (nextID.empty()) break;
+        curr = new commitNode(nextID);
+    }
+}
 
-    //     // if (staging_area_files.size() == latest_commit_files.size())
-    //     // {
-    //     //     cout << "the branch is up-to-date";
-    //     // }
-    //     // else
-    //     // {
-    //     //     cout << "untracked files: \n";
-    //     //     for (auto i = v.begin(); i != v.end(); i++)
-    //     //     {
-    //     //     }
-    //     // }
-    // }
-};
+commitNode* commitNodeList::getHead() { return HEAD; }
+commitNode* commitNodeList::getTail() { return TAIL; }
+void commitNodeList::setHead(commitNode* h) { HEAD = h; }
+void commitNodeList::setTail(commitNode* t) { TAIL = t; }
